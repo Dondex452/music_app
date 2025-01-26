@@ -1,6 +1,7 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, 
-                             QTreeView, QFileDialog, QMessageBox, QLabel,
-                             QHBoxLayout, QFrame, QSplitter)
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QTreeView, 
+                            QFileDialog, QMessageBox, QLabel, QHBoxLayout, 
+                            QFrame, QSplitter, QInputDialog, QListWidget,
+                            QMenu, QAction)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QFont, QIcon
 
@@ -13,6 +14,7 @@ class LibraryView(QWidget):
         self.library = MusicLibrary()
         self.model = QStandardItemModel()
         self.model.setHorizontalHeaderLabels(['Title', 'Artist', 'Album', 'Duration'])
+        self.playlists = {}  # Dictionary to store playlists
         self.init_ui()
     
     def init_ui(self):
@@ -114,6 +116,33 @@ class LibraryView(QWidget):
         
         playlists_layout.addLayout(playlists_header)
         
+        # Add playlist list widget
+        self.playlist_list = QListWidget()
+        self.playlist_list.setStyleSheet("""
+            QListWidget {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 8px;
+            }
+            QListWidget::item:hover {
+                background-color: #e3f2fd;
+            }
+            QListWidget::item:selected {
+                background-color: #bbdefb;
+            }
+        """)
+        playlists_layout.addWidget(self.playlist_list)
+        
+        # Context menu for playlist items
+        self.playlist_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.playlist_list.customContextMenuRequested.connect(self.show_playlist_menu)
+        
+        # Double click to play playlist
+        self.playlist_list.itemDoubleClicked.connect(self.play_playlist)
+        
         # Add playlists widget to splitter
         splitter.addWidget(playlists_widget)
         
@@ -166,8 +195,98 @@ class LibraryView(QWidget):
             self.model.appendRow([title_item, artist_item, album_item, duration_item])
     
     def create_playlist(self):
-        # TODO: Implement playlist creation dialog
-        pass
+        """Create a new playlist."""
+        name, ok = QInputDialog.getText(self, 'Create Playlist', 'Enter playlist name:')
+        if ok and name:
+            if name not in self.playlists:
+                self.playlists[name] = []
+                self.playlist_list.addItem(name)
+                return name
+        return None
+
+    def add_to_playlist(self, playlist_name):
+        """Add selected tracks to playlist."""
+        selected_track = self.get_selected_track()
+        if selected_track and playlist_name in self.playlists:
+            if selected_track not in self.playlists[playlist_name]:
+                self.playlists[playlist_name].append(selected_track)
+
+    def show_playlist_menu(self, position):
+        """Show context menu for playlists."""
+        menu = QMenu()
+        delete_action = QAction("Delete Playlist", self)
+        play_action = QAction("Play Playlist", self)
+        
+        menu.addAction(play_action)
+        menu.addAction(delete_action)
+        
+        item = self.playlist_list.itemAt(position)
+        if item:
+            action = menu.exec_(self.playlist_list.mapToGlobal(position))
+            if action == delete_action:
+                self.delete_playlist(item.text())
+            elif action == play_action:
+                self.play_playlist(item)
+
+    def delete_playlist(self, name):
+        """Delete a playlist."""
+        if name in self.playlists:
+            del self.playlists[name]
+            items = self.playlist_list.findItems(name, Qt.MatchExactly)
+            for item in items:
+                self.playlist_list.takeItem(self.playlist_list.row(item))
+
+    def play_playlist(self, item):
+        """Play the selected playlist."""
+        playlist_name = item.text()
+        if playlist_name in self.playlists and self.playlists[playlist_name]:
+            from .main_window import MainWindow
+            main_window = self.window()
+            if isinstance(main_window, MainWindow):
+                tracks = self.playlists[playlist_name]
+                main_window.playback_controls.set_playlist(tracks, 0)
+
+    def filter_library(self, search_text):
+        """Filter library based on search text."""
+        search_text = search_text.lower()
+        for row in range(self.model.rowCount()):
+            show_row = False
+            for col in range(self.model.columnCount()):
+                item = self.model.item(row, col)
+                if search_text in item.text().lower():
+                    show_row = True
+                    break
+            self.tree_view.setRowHidden(row, self.tree_view.rootIndex(), not show_row)
+
+    # Add context menu for library items
+    def setup_tree_view_context_menu(self):
+        self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self.show_library_context_menu)
+
+    def show_library_context_menu(self, position):
+        """Show context menu for library items."""
+        menu = QMenu()
+        add_to_playlist_menu = QMenu("Add to Playlist", self)
+        
+        # Add existing playlists
+        for playlist_name in self.playlists.keys():
+            action = QAction(playlist_name, self)
+            action.triggered.connect(lambda x, name=playlist_name: self.add_to_playlist(name))
+            add_to_playlist_menu.addAction(action)
+        
+        # Add "New Playlist" option
+        new_playlist_action = QAction("New Playlist...", self)
+        new_playlist_action.triggered.connect(self.create_and_add_to_playlist)
+        add_to_playlist_menu.addAction(new_playlist_action)
+        
+        menu.addMenu(add_to_playlist_menu)
+        menu.exec_(self.tree_view.mapToGlobal(position))
+
+    def create_and_add_to_playlist(self):
+        """Create a new playlist and add selected track."""
+        playlist_name = self.create_playlist()
+        if playlist_name:
+            self.add_to_playlist(playlist_name)
     
     def get_selected_track(self):
         """Get the file path of the selected track."""
@@ -194,3 +313,25 @@ class LibraryView(QWidget):
         minutes = int(seconds) // 60
         seconds = int(seconds) % 60
         return f"{minutes}:{seconds:02d}"
+    
+    def highlight_playing_track(self, file_path: str):
+        """Highlight the currently playing track in the tree view."""
+        for row in range(self.model.rowCount()):
+            item = self.model.item(row, 0)
+            if item.data(Qt.UserRole) == file_path:
+                self.tree_view.setCurrentIndex(item.index())
+                self.tree_view.scrollTo(item.index())
+                break
+    
+    def get_track_at_index(self, index: int) -> str:
+        """Get track path at specific index."""
+        if 0 <= index < self.model.rowCount():
+            return self.model.item(index, 0).data(Qt.UserRole)
+        return None
+    
+    def get_track_index(self, file_path: str) -> int:
+        """Get the index of a track in the library."""
+        for row in range(self.model.rowCount()):
+            if self.model.item(row, 0).data(Qt.UserRole) == file_path:
+                return row
+        return -1

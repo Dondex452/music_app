@@ -1,10 +1,15 @@
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QPushButton, QSlider,
                              QStyle, QVBoxLayout, QLabel)
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont
 from audio.player import AudioPlayer
+import random
 
 class PlaybackControls(QWidget):
+    # Add these signals at the start of the class
+    trackChanged = pyqtSignal(str)  # Emitted when track changes
+    playbackStateChanged = pyqtSignal(bool)  # Emitted when play/pause state changes
+
     def __init__(self):
         super().__init__()
         self.player = AudioPlayer()
@@ -12,6 +17,8 @@ class PlaybackControls(QWidget):
         self.current_index = -1
         self.is_shuffle = False
         self.is_repeat = False
+        self.shuffle_history = []  # Track shuffle history
+        self.shuffle_index = -1
         
         # Setup timer for progress updates
         self.update_timer = QTimer()
@@ -139,6 +146,7 @@ class PlaybackControls(QWidget):
         if self.player.load_track(track_path):
             self.progress_bar.setMaximum(self.player.get_duration())
             self.duration_label.setText(self.format_time(self.player.get_duration()))
+            self.trackChanged.emit(track_path)
             self.play()
     
     def set_playlist(self, tracks: list, current_index: int = 0):
@@ -161,19 +169,23 @@ class PlaybackControls(QWidget):
         self.player.play()
         self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
         self.update_timer.start()
+        self.playbackStateChanged.emit(True)
     
     def pause(self):
         self.player.pause()
         self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.update_timer.stop()
+        self.playbackStateChanged.emit(False)
     
     def previous_track(self):
         if not self.current_playlist:
             return
             
         if self.is_shuffle:
-            # TODO: Implement shuffle previous
-            pass
+            if self.shuffle_history and self.shuffle_index > 0:
+                self.shuffle_index -= 1
+                track = self.shuffle_history[self.shuffle_index]
+                self.load_track(track)
         else:
             self.current_index = (self.current_index - 1) % len(self.current_playlist)
             self.load_track(self.current_playlist[self.current_index])
@@ -183,8 +195,18 @@ class PlaybackControls(QWidget):
             return
             
         if self.is_shuffle:
-            # TODO: Implement shuffle next
-            pass
+            if self.shuffle_index < len(self.shuffle_history) - 1:
+                self.shuffle_index += 1
+                track = self.shuffle_history[self.shuffle_index]
+            else:
+                available_tracks = [t for t in self.current_playlist 
+                                  if t not in self.shuffle_history[-5:]]  # Avoid recent tracks
+                if not available_tracks:
+                    available_tracks = self.current_playlist
+                track = random.choice(available_tracks)
+                self.shuffle_history.append(track)
+                self.shuffle_index = len(self.shuffle_history) - 1
+            self.load_track(track)
         else:
             self.current_index = (self.current_index + 1) % len(self.current_playlist)
             self.load_track(self.current_playlist[self.current_index])

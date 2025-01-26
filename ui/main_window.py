@@ -209,6 +209,10 @@ class MainWindow(QMainWindow):
         
         # Connect search
         self.search_bar.textChanged.connect(self.search_library)
+
+        # Connect playback control signals
+        self.playback_controls.trackChanged.connect(self.on_track_changed)
+        self.playback_controls.playbackStateChanged.connect(self.on_playback_state_changed)
     
     def toggle_theme(self):
         """Toggle between light and dark theme."""
@@ -231,11 +235,39 @@ class MainWindow(QMainWindow):
             # Set the playlist and start playing
             self.playback_controls.set_playlist(all_tracks, current_index)
             
-            # Update now playing information
-            metadata = MetadataReader.read_metadata(track_path)
-            self.now_playing_label.setText(metadata.get('title', 'Unknown Title'))
-            self.artist_label.setText(metadata.get('artist', 'Unknown Artist'))
-            self.album_label.setText(metadata.get('album', 'Unknown Album'))
+            # Update UI
+            self.update_now_playing(track_path)
+
+    def on_track_changed(self, track_path):
+        """Called when the current track changes."""
+        self.library_view.highlight_playing_track(track_path)
+        self.update_now_playing(track_path)
+
+    def on_playback_state_changed(self, is_playing):
+        """Called when playback state changes."""
+        if is_playing:
+            self.setWindowTitle(f"▶ {self.now_playing_label.text()} - Music Player")
+        else:
+            self.setWindowTitle("Music Player")
+
+    def update_now_playing(self, track_path):
+        """Update now playing information."""
+        metadata = MetadataReader.read_metadata(track_path)
+        
+        # Update labels with better formatting
+        title = metadata.get('title', os.path.basename(track_path))
+        self.now_playing_label.setText(title)
+        self.now_playing_label.setToolTip(title)
+        
+        artist = metadata.get('artist', 'Unknown Artist')
+        self.artist_label.setText(artist)
+        
+        album = metadata.get('album', 'Unknown Album')
+        self.album_label.setText(album)
+        
+        # Update window title
+        if self.playback_controls.player.is_playing:
+            self.setWindowTitle(f"▶ {title} - Music Player")
     
     def volume_changed(self, value):
         # Convert 0-100 range to 0-1 range
@@ -243,5 +275,5 @@ class MainWindow(QMainWindow):
         self.playback_controls.set_volume(volume)
     
     def search_library(self, text):
-        # TODO: Implement library search
-        pass
+        """Implement library search."""
+        self.library_view.filter_library(text)
